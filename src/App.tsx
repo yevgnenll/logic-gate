@@ -189,7 +189,13 @@ const GateComponent = React.memo(({ gate, onDragStart, onDrag, onDragEnd, onPort
                         cx={pos.x - gate.position.x}
                         cy={pos.y - gate.position.y}
                         r={PORT_RADIUS}
-                        className={`transition-colors ${portValue ? 'fill-sky-400' : 'fill-gray-400' } ${!isReadOnly && 'hover:fill-yellow-400 cursor-pointer'}`}
+                        className={`transition-colors ${portValue ? 'fill-sky-400' : 'fill-gray-400'} pointer-events-none`}
+                    />
+                    <circle
+                        cx={pos.x - gate.position.x}
+                        cy={pos.y - gate.position.y}
+                        r={PORT_RADIUS * 1.8}
+                        className={`fill-transparent ${!isReadOnly && 'cursor-pointer'}`}
                         onClick={(e) => { if (!isReadOnly) { e.stopPropagation(); onPortClick(gate.id, portType, i); } }}
                         onDoubleClick={(e) => { if (!isReadOnly && portType === 'input') { e.stopPropagation(); onPortDoubleClick(e, gate.id, i); }}}
                     />
@@ -259,7 +265,6 @@ export default function App() {
                 setIsReadOnly(true);
             } catch (e) {
                 console.error("Failed to parse view data from URL", e);
-                // Load default state if parsing fails
                 setState({
                     gates: [
                         { id: 'input1', type: 'INPUT', position: { x: 50, y: 50 }, value: false, name: 'A' },
@@ -269,7 +274,6 @@ export default function App() {
                 }, true);
             }
         } else {
-            // Load default state for editor mode
             setState({
                 gates: [
                     { id: 'input1', type: 'INPUT', position: { x: 50, y: 50 }, value: false, name: 'A' },
@@ -307,6 +311,7 @@ export default function App() {
     };
 
     const handleGateDragStart = useCallback((gateId: string) => {
+        selectionStartPoint.current = null; // Prevent selection box from appearing
         const dragIds = selectedGateIds.includes(gateId) ? selectedGateIds : [gateId];
         const startPositions = new Map<string, {x:number, y:number}>();
         gates.forEach(g => {
@@ -384,6 +389,8 @@ export default function App() {
     };
 
     const handleCanvasMouseDown = (e: React.MouseEvent) => {
+        if (e.target !== e.currentTarget) return; // This is the fix for drag bug
+
         if (e.button === 1) { // Middle mouse button for panning
             setIsPanning(true);
             panStartRef.current = { x: e.clientX, y: e.clientY };
@@ -458,7 +465,6 @@ export default function App() {
     };
 
     const handleGateClick = (e: React.MouseEvent, gateId: string) => {
-        e.stopPropagation();
         if (dragInfoRef.current?.hasDragged) return;
 
         const gate = gates.find(g => g.id === gateId);
