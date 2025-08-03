@@ -124,7 +124,8 @@ const getPortPosition = (gate: Gate | Omit<Gate, 'value'>, type: 'input' | 'outp
     const dimensions = isCustom ? { width: CUSTOM_GATE_WIDTH, height: Math.max(customGateDef.inputs.length, customGateDef.outputs.length) * 40 + 20 } : GATE_DIMENSIONS[gate.type as BaseGateType];
     const portCount = isCustom
         ? (type === 'input' ? customGateDef.inputs.length : customGateDef.outputs.length)
-        : (type === 'input' ? GATE_DIMENSIONS[gate.type as BaseGateType].inputs : GATE_DIMENSIONS[gate.type as BaseGateType].outputs);
+        // Fallback for safety, though it shouldn't be needed with proper gate types
+        : (GATE_DIMENSIONS[gate.type as BaseGateType]?.inputs ?? 0);
 
     if (portCount === 0) return {x:0, y:0};
     const spacing = dimensions.height / (portCount + 1);
@@ -137,14 +138,14 @@ const getPortPosition = (gate: Gate | Omit<Gate, 'value'>, type: 'input' | 'outp
 
 // --- 컴포넌트 ---
 
-const GateComponent = React.memo(({ gate, onDragStart, onDrag, onDragEnd, onPortClick, onPortDoubleClick, onToggle, isSelected, customGateDef }: {
+const GateComponent = React.memo(({ gate, onDragStart, onDrag, onDragEnd, onPortClick, onPortDoubleClick, onClick, isSelected, customGateDef }: {
     gate: Gate;
     onDragStart: (gateId: string, e: React.MouseEvent) => void;
     onDrag: (dragDelta: { dx: number; dy: number }) => void;
     onDragEnd: () => void;
     onPortClick: (gateId: string, portType: 'input' | 'output', portIndex: number) => void;
     onPortDoubleClick: (e: React.MouseEvent, gateId: string, portIndex: number) => void;
-    onToggle?: (id: string) => void;
+    onClick: (e: React.MouseEvent, gateId: string) => void;
     isSelected: boolean;
     customGateDef?: CustomGateTemplate;
 }) => {
@@ -155,7 +156,6 @@ const GateComponent = React.memo(({ gate, onDragStart, onDrag, onDragEnd, onPort
 
 
     const handleMouseDown = (e: React.MouseEvent) => {
-        e.stopPropagation();
         onDragStart(gate.id, e);
         const startPos = { x: e.clientX, y: e.clientY };
 
@@ -165,7 +165,7 @@ const GateComponent = React.memo(({ gate, onDragStart, onDrag, onDragEnd, onPort
             onDrag({ dx, dy });
         };
 
-        const handleMouseUp = () => {
+        const handleMouseUp = (e: MouseEvent) => {
             onDragEnd();
             document.removeEventListener('mousemove', handleMouseMove);
             document.removeEventListener('mouseup', handleMouseUp);
@@ -202,7 +202,7 @@ const GateComponent = React.memo(({ gate, onDragStart, onDrag, onDragEnd, onPort
     const fillStyle = gate.value ? 'fill-sky-400' : 'fill-gray-700';
 
     return (
-        <g transform={`translate(${gate.position.x}, ${gate.position.y})`} onMouseDown={handleMouseDown} className="cursor-move select-none">
+        <g transform={`translate(${gate.position.x}, ${gate.position.y})`} onMouseDown={handleMouseDown} onClick={(e) => onClick(e, gate.id)} className="cursor-move select-none">
             {gate.type === 'CUSTOM' && (
                 <rect width={dimensions.width} height={dimensions.height} rx="10" className={`${fillStyle} ${gateBodyStyle}`} />
             )}
@@ -214,8 +214,6 @@ const GateComponent = React.memo(({ gate, onDragStart, onDrag, onDragEnd, onPort
             <text x={dimensions.width / 2} y={dimensions.height / 2 + 5} textAnchor="middle" className="fill-white font-bold text-sm pointer-events-none">
                 {gate.type === 'INPUT' ? (gate.value ? 'ON' : 'OFF') : gate.name || gate.type}
             </text>
-
-            {gate.type === 'INPUT' && onToggle && ( <rect width={dimensions.width} height={dimensions.height} rx="10" className="fill-transparent cursor-pointer" /> )}
 
             {renderPorts('input')}
             {renderPorts('output')}
@@ -260,6 +258,7 @@ export default function App() {
     const dragInfoRef = useRef<{startPositions: Map<string, {x:number, y:number}>, dragIds: string[], hasDragged: boolean} | null>(null);
     const selectionStartPoint = useRef<{x: number, y: number} | null>(null);
     const panStartRef = useRef<{x: number, y: number} | null>(null);
+    const svgRef = useRef<SVGSVGElement>(null);
 
     const [connecting, setConnecting] = useState<{ from: { gateId: string; portIndex: number }; mousePos: { x: number; y: number } } | null>(null);
     const [selectedGateIds, setSelectedGateIds] = useState<string[]>([]);
@@ -616,6 +615,23 @@ export default function App() {
 
     const isUpdating = customGateName.trim().toUpperCase() in customGates;
 
+    const handleZoom = (direction: 'in' | 'out' | 'reset') => {
+        if (direction === 'reset') {
+            setViewTransform({ x: 0, y: 0, k: 1 });
+            return;
+        }
+        if (!svgRef.current) return;
+        const { clientWidth, clientHeight } = svgRef.current;
+        const centerX = clientWidth / 2;
+        const centerY = clientHeight / 2;
+
+        const zoomFactor = 1.2;
+        const newK = direction === 'in' ? viewTransform.k * zoomFactor : viewTransform.k / zoomFactor;
+        const newX = centerX - (centerX - viewTransform.x) * (newK / viewTransform.k);
+        const newY = centerY - (centerY - viewTransform.y) * (newK / viewTransform.k);
+        setViewTransform({ x: newX, y: newY, k: newK });
+    };
+
     return (
         <div className="w-screen h-screen bg-gray-800 flex flex-col font-sans text-white overflow-hidden">
             <header className="bg-gray-900 p-3 shadow-lg z-10 flex items-center justify-between flex-wrap gap-2">
@@ -626,7 +642,7 @@ export default function App() {
                     <button onClick={() => addGate('AND')} className="bg-sky-500 hover:bg-sky-600 px-3 py-1 rounded-md font-semibold transition-colors">Add AND</button>
                     <button onClick={() => addGate('OR')} className="bg-teal-500 hover:bg-teal-600 px-3 py-1 rounded-md font-semibold transition-colors">Add OR</button>
                     <button onClick={() => addGate('NOT')} className="bg-indigo-500 hover:bg-indigo-600 px-3 py-1 rounded-md font-semibold transition-colors">Add NOT</button>
-                    <button onClick={() => setState({gates: state.gates.slice(0, 3).map(g => ({...g, value:false})), wires: []})} className="bg-red-500 hover:bg-red-600 px-3 py-1 rounded-md font-semibold transition-colors">Reset</button>
+                    <button onClick={() => setState({gates: [], wires: []})} className="bg-red-500 hover:bg-red-600 px-3 py-1 rounded-md font-semibold transition-colors">Reset</button>
                     <button onClick={undo} disabled={!canUndo} className="disabled:opacity-50 disabled:cursor-not-allowed bg-gray-600 hover:bg-gray-700 px-3 py-1 rounded-md font-semibold transition-colors">Undo</button>
                     <button onClick={redo} disabled={!canRedo} className="disabled:opacity-50 disabled:cursor-not-allowed bg-gray-600 hover:bg-gray-700 px-3 py-1 rounded-md font-semibold transition-colors">Redo</button>
                 </div>
@@ -634,6 +650,7 @@ export default function App() {
 
             <main className="flex-grow relative">
                 <svg width="100%" height="100%"
+                     ref={svgRef}
                      onMouseDown={handleCanvasMouseDown}
                      onMouseMove={handleCanvasMouseMove}
                      onMouseUp={handleCanvasMouseUp}
@@ -647,7 +664,7 @@ export default function App() {
                                 <path d={`M 20 0 L 0 0 0 20`} fill="none" stroke="rgba(128,128,128,0.2)" strokeWidth="1"/>
                             </pattern>
                         </defs>
-                        <rect x={-viewTransform.x / viewTransform.k} y={-viewTransform.y / viewTransform.k} width="100%" height="100%" fill="url(#grid)" />
+                        <rect x={-viewTransform.x / viewTransform.k} y={-viewTransform.y / viewTransform.k} width="100vw" height="100vh" className="scale-[2]" fill="url(#grid)" />
 
                         {wires.map(wire => (
                             <WireComponent key={wire.id} wire={wire} gates={gates} customGates={customGates} value={wireValues.get(wire.id) || false} />
@@ -664,19 +681,18 @@ export default function App() {
                         )}
 
                         {gates.map(gate => (
-                            <g key={gate.id} onClick={(e) => handleGateClick(e, gate.id)}>
-                                <GateComponent
-                                    gate={gate}
-                                    onDragStart={handleGateDragStart}
-                                    onDrag={handleGateDrag}
-                                    onDragEnd={handleGateDragEnd}
-                                    onPortClick={handlePortClick}
-                                    onPortDoubleClick={handlePortDoubleClick}
-                                    onToggle={gate.type === 'INPUT' ? handleInputToggle : undefined}
-                                    isSelected={selectedGateIds.includes(gate.id)}
-                                    customGateDef={gate.type === 'CUSTOM' ? customGates[gate.customGateName!] : undefined}
-                                />
-                            </g>
+                            <GateComponent
+                                key={gate.id}
+                                gate={gate}
+                                onDragStart={handleGateDragStart}
+                                onDrag={handleGateDrag}
+                                onDragEnd={handleGateDragEnd}
+                                onPortClick={handlePortClick}
+                                onPortDoubleClick={handlePortDoubleClick}
+                                onClick={handleGateClick}
+                                isSelected={selectedGateIds.includes(gate.id)}
+                                customGateDef={gate.type === 'CUSTOM' ? customGates[gate.customGateName!] : undefined}
+                            />
                         ))}
                         {selectionBox && (
                             <rect
@@ -711,6 +727,7 @@ export default function App() {
                                     type="text"
                                     value={customGateName}
                                     onChange={(e) => setCustomGateName(e.target.value)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') handleSaveCustomGate(); }}
                                     placeholder="Gate Name (e.g. NAND)"
                                     className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
                                     onClick={e => e.stopPropagation()}
@@ -729,6 +746,11 @@ export default function App() {
                     <p>• Double-click a connected input port to move the wire.</p>
                     <p>• <kbd>Shift</kbd> + Click to add/remove from selection.</p>
                     <p>• Select gates and press <kbd>Delete</kbd> to remove them.</p>
+                </div>
+                <div className="absolute bottom-4 right-4 bg-gray-900/80 p-1 rounded-lg flex items-center gap-1 text-white text-xs">
+                    <button onClick={() => handleZoom('out')} className="w-7 h-7 font-bold text-lg flex items-center justify-center hover:bg-gray-700 rounded">-</button>
+                    <button onClick={() => handleZoom('reset')} className="w-14 h-7 hover:bg-gray-700 rounded">{Math.round(viewTransform.k * 100)}%</button>
+                    <button onClick={() => handleZoom('in')} className="w-7 h-7 font-bold text-lg flex items-center justify-center hover:bg-gray-700 rounded">+</button>
                 </div>
             </main>
         </div>
