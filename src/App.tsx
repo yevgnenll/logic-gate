@@ -488,6 +488,13 @@ export default function App() {
             if (isReadOnly) return;
             const target = e.target as HTMLElement;
             if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+
+            if (e.key === 'Escape') {
+                if (connecting) {
+                    setConnecting(null);
+                }
+            }
+
             const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
             const modKey = isMac ? e.metaKey : e.ctrlKey;
             if (modKey && e.key === 'z') { e.preventDefault(); undo(); }
@@ -499,7 +506,7 @@ export default function App() {
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [selectedGateIds, setState, undo, redo, isReadOnly]);
+    }, [selectedGateIds, setState, undo, redo, isReadOnly, connecting]);
 
     // Logic simulation
     useEffect(() => {
@@ -798,6 +805,7 @@ export default function App() {
                         <div className="absolute bottom-4 left-4 bg-gray-900/80 p-3 rounded-lg text-sm flex flex-col gap-1">
                             <p><strong className="text-sky-400">How to use:</strong></p>
                             <p>• Drag on canvas to select multiple gates.</p>
+                            <p>• Press <kbd>Esc</kbd> to cancel wiring.</p>
                             <p>• <kbd>Cmd/Ctrl + Z</kbd> to Undo, <kbd>Cmd/Ctrl + Y</kbd> to Redo.</p>
                             <p>• Double-click a connected input port to move the wire.</p>
                             <p>• <kbd>Shift</kbd> + Click to add/remove from selection.</p>
