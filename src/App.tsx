@@ -35,6 +35,12 @@ interface CustomGateTemplate {
     outputs: { originalId: string, name?: string }[];
 }
 
+interface ViewTransform {
+    x: number;
+    y: number;
+    k: number; // zoom level
+}
+
 // --- 상수 정의 ---
 const GATE_DIMENSIONS: Record<BaseGateType, { width: number; height: number; inputs: number; outputs: number; }> = {
     INPUT: { width: 100, height: 50, inputs: 0, outputs: 1 },
@@ -132,8 +138,8 @@ const getPortPosition = (gate: Gate | Omit<Gate, 'value'>, type: 'input' | 'outp
 
 const GateComponent = React.memo(({ gate, onDragStart, onDrag, onDragEnd, onPortClick, onPortDoubleClick, onToggle, isSelected, customGateDef }: {
     gate: Gate;
-    onDragStart: () => void;
-    onDrag: (id: string, pos: { x: number; y: number }) => void;
+    onDragStart: (gateId: string) => void;
+    onDrag: (dragDelta: { dx: number; dy: number }) => void;
     onDragEnd: () => void;
     onPortClick: (gateId: string, portType: 'input' | 'output', portIndex: number) => void;
     onPortDoubleClick: (e: React.MouseEvent, gateId: string, portIndex: number) => void;
@@ -149,14 +155,13 @@ const GateComponent = React.memo(({ gate, onDragStart, onDrag, onDragEnd, onPort
 
     const handleMouseDown = (e: React.MouseEvent) => {
         e.stopPropagation();
-        onDragStart();
+        onDragStart(gate.id);
         const startPos = { x: e.clientX, y: e.clientY };
-        const startGatePos = gate.position;
 
         const handleMouseMove = (moveE: MouseEvent) => {
             const dx = moveE.clientX - startPos.x;
             const dy = moveE.clientY - startPos.y;
-            onDrag(gate.id, { x: startGatePos.x + dx, y: startGatePos.y + dy });
+            onDrag({ dx, dy });
         };
 
         const handleMouseUp = () => {
@@ -251,28 +256,57 @@ export default function App() {
         wires: [],
     });
     const { gates, wires } = state;
-    const isDraggingGateRef = useRef(false);
+    const dragInfoRef = useRef<{startPositions: Map<string, {x:number, y:number}>, dragIds: string[]} | null>(null);
     const selectionStartPoint = useRef<{x: number, y: number} | null>(null);
+    const panStartRef = useRef<{x: number, y: number} | null>(null);
 
     const [connecting, setConnecting] = useState<{ from: { gateId: string; portIndex: number }; mousePos: { x: number; y: number } } | null>(null);
     const [selectedGateIds, setSelectedGateIds] = useState<string[]>([]);
     const [customGateName, setCustomGateName] = useState("");
     const [customGates, setCustomGates] = useState<{ [name: string]: CustomGateTemplate }>({});
     const [selectionBox, setSelectionBox] = useState<{x: number, y: number, width: number, height: number} | null>(null);
+    const [viewTransform, setViewTransform] = useState<ViewTransform>({ x: 0, y: 0, k: 1 });
+    const [isPanning, setIsPanning] = useState(false);
 
     useEffect(() => { try { const saved = localStorage.getItem('customLogicGates'); if (saved) { setCustomGates(JSON.parse(saved)); } } catch (error) { console.error("Failed to load custom gates", error); } }, []);
     useEffect(() => { try { localStorage.setItem('customLogicGates', JSON.stringify(customGates)); } catch (error) { console.error("Failed to save custom gates", error); } }, [customGates]);
 
     const addGate = (type: BaseGateType) => {
-        const newGate: Gate = { id: `${type}-${Date.now()}`, type, position: { x: 250, y: 150 }, value: false, };
+        const newGate: Gate = { id: `${type}-${Date.now()}`, type, position: { x: (250 - viewTransform.x) / viewTransform.k, y: (150 - viewTransform.y) / viewTransform.k }, value: false, };
         setState(s => ({...s, gates: [...s.gates, newGate]}));
     };
 
-    const handleGateDragStart = useCallback(() => { isDraggingGateRef.current = true; }, []);
-    const handleGateDragEnd = useCallback(() => { setTimeout(() => {isDraggingGateRef.current = false;}, 0); setState(s => ({...s}), true); }, [setState]);
-    const handleGateDrag = useCallback((id: string, position: { x: number; y: number }) => {
-        setPresentState(s => ({ ...s, gates: s.gates.map(gate => gate.id === id ? { ...gate, position } : gate) }));
-    }, [setPresentState]);
+    const handleGateDragStart = useCallback((gateId: string) => {
+        const dragIds = selectedGateIds.includes(gateId) ? selectedGateIds : [gateId];
+        const startPositions = new Map<string, {x:number, y:number}>();
+        gates.forEach(g => {
+            if (dragIds.includes(g.id)) {
+                startPositions.set(g.id, g.position);
+            }
+        });
+        dragInfoRef.current = { startPositions, dragIds };
+    }, [selectedGateIds, gates]);
+
+    const handleGateDrag = useCallback((dragDelta: { dx: number; dy: number }) => {
+        if (!dragInfoRef.current) return;
+        const { startPositions, dragIds } = dragInfoRef.current;
+        setPresentState(s => ({
+            ...s,
+            gates: s.gates.map(gate => {
+                if (dragIds.includes(gate.id)) {
+                    const startPos = startPositions.get(gate.id)!;
+                    return { ...gate, position: { x: startPos.x + dragDelta.dx / viewTransform.k, y: startPos.y + dragDelta.dy / viewTransform.k } };
+                }
+                return gate;
+            })
+        }));
+    }, [setPresentState, viewTransform.k]);
+
+    const handleGateDragEnd = useCallback(() => {
+        if (!dragInfoRef.current) return;
+        dragInfoRef.current = null;
+        setState(s => ({...s}), true); // Record history after drag ends
+    }, [setState]);
 
     const handleInputToggle = useCallback((id: string) => { setState(s => ({ ...s, gates: s.gates.map(g => (g.id === id && g.type === 'INPUT') ? { ...g, value: !g.value } : g) })); }, [setState]);
     const handlePortClick = useCallback((gateId: string, portType: 'input' | 'output', portIndex: number) => {
@@ -294,17 +328,12 @@ export default function App() {
         const wireToDisconnect = wires.find(w => w.to.gateId === gateId && w.to.portIndex === portIndex);
         if (wireToDisconnect) {
             setState(s => ({...s, wires: s.wires.filter(w => w.id !== wireToDisconnect.id)}));
-            const svg = (e.target as SVGElement).ownerSVGElement;
-            if (svg) {
-                const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
-                const { x, y } = pt.matrixTransform(svg.getScreenCTM()?.inverse());
-                setConnecting({ from: wireToDisconnect.from, mousePos: { x, y } });
-            }
+            const {x, y} = getSvgCoordinates(e, (e.currentTarget as SVGSVGElement));
+            setConnecting({ from: wireToDisconnect.from, mousePos: { x, y } });
         }
     }, [wires, setState]);
 
-    const getSvgCoordinates = (e: React.MouseEvent | MouseEvent) => {
-        const svg = (e.currentTarget as SVGSVGElement).ownerSVGElement ?? e.currentTarget as SVGSVGElement;
+    const getSvgCoordinates = (e: React.MouseEvent | MouseEvent, svg: SVGSVGElement) => {
         if (svg) {
             const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
             return pt.matrixTransform(svg.getScreenCTM()?.inverse());
@@ -312,22 +341,45 @@ export default function App() {
         return {x: 0, y: 0};
     };
 
+    const getWorldCoordinates = (e: React.MouseEvent | MouseEvent, svg: SVGSVGElement) => {
+        const { x: svgX, y: svgY } = getSvgCoordinates(e, svg);
+        return {
+            x: (svgX - viewTransform.x) / viewTransform.k,
+            y: (svgY - viewTransform.y) / viewTransform.k
+        };
+    };
+
     const handleCanvasMouseDown = (e: React.MouseEvent) => {
+        if (e.button === 1) { // Middle mouse button for panning
+            setIsPanning(true);
+            panStartRef.current = { x: e.clientX, y: e.clientY };
+            e.preventDefault();
+            return;
+        }
+        if (e.target !== e.currentTarget) return;
         setConnecting(null);
         if(!e.shiftKey) {
             setSelectedGateIds([]);
         }
-        selectionStartPoint.current = getSvgCoordinates(e);
+        selectionStartPoint.current = getWorldCoordinates(e, e.currentTarget as SVGSVGElement);
     };
 
     const handleCanvasMouseMove = (e: React.MouseEvent) => {
+        const svg = e.currentTarget as SVGSVGElement;
+        if (isPanning && panStartRef.current) {
+            const dx = e.clientX - panStartRef.current.x;
+            const dy = e.clientY - panStartRef.current.y;
+            setViewTransform(v => ({ ...v, x: v.x + dx, y: v.y + dy }));
+            panStartRef.current = { x: e.clientX, y: e.clientY };
+            return;
+        }
         if(connecting) {
-            const {x, y} = getSvgCoordinates(e);
+            const { x, y } = getWorldCoordinates(e, svg);
             setConnecting(c => c ? { ...c, mousePos: { x, y } } : null);
             return;
         }
         if (!selectionStartPoint.current) return;
-        const currentPoint = getSvgCoordinates(e);
+        const currentPoint = getWorldCoordinates(e, svg);
         const startPoint = selectionStartPoint.current;
         const x = Math.min(startPoint.x, currentPoint.x);
         const y = Math.min(startPoint.y, currentPoint.y);
@@ -337,6 +389,10 @@ export default function App() {
     };
 
     const handleCanvasMouseUp = () => {
+        if (isPanning) {
+            setIsPanning(false);
+            panStartRef.current = null;
+        }
         if (selectionBox) {
             const newlySelectedIds = gates.filter(gate => {
                 const gateDef = gate.type === 'CUSTOM' ? customGates[gate.customGateName!] : undefined;
@@ -356,9 +412,20 @@ export default function App() {
         setSelectionBox(null);
     };
 
+    const handleWheel = (e: React.WheelEvent) => {
+        e.preventDefault();
+        const svg = e.currentTarget as SVGSVGElement;
+        const { x: pointerX, y: pointerY } = getSvgCoordinates(e, svg);
+        const zoomFactor = 1.1;
+        const newK = e.deltaY < 0 ? viewTransform.k * zoomFactor : viewTransform.k / zoomFactor;
+        const newX = pointerX - (pointerX - viewTransform.x) * (newK / viewTransform.k);
+        const newY = pointerY - (pointerY - viewTransform.y) * (newK / viewTransform.k);
+        setViewTransform({ x: newX, y: newY, k: newK });
+    };
+
     const handleGateClick = (e: React.MouseEvent, gateId: string) => {
         e.stopPropagation();
-        if (isDraggingGateRef.current) return;
+        if (dragInfoRef.current) return;
 
         const gate = gates.find(g => g.id === gateId);
         if (!gate) return;
@@ -567,52 +634,56 @@ export default function App() {
                      onMouseMove={handleCanvasMouseMove}
                      onMouseUp={handleCanvasMouseUp}
                      onMouseLeave={handleCanvasMouseUp}
+                     onWheel={handleWheel}
+                     className={isPanning ? 'cursor-grabbing' : 'cursor-default'}
                 >
-                    <defs>
-                        <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
-                            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(128,128,128,0.2)" strokeWidth="1"/>
-                        </pattern>
-                    </defs>
-                    <rect width="100%" height="100%" fill="url(#grid)" />
+                    <g transform={`translate(${viewTransform.x}, ${viewTransform.y}) scale(${viewTransform.k})`}>
+                        <defs>
+                            <pattern id="grid" width={20 * viewTransform.k} height={20 * viewTransform.k} patternUnits="userSpaceOnUse">
+                                <path d={`M ${20 * viewTransform.k} 0 L 0 0 0 ${20 * viewTransform.k}`} fill="none" stroke="rgba(128,128,128,0.2)" strokeWidth="1"/>
+                            </pattern>
+                        </defs>
+                        <rect x={-viewTransform.x / viewTransform.k} y={-viewTransform.y / viewTransform.k} width="100%" height="100%" fill="url(#grid)" />
 
-                    {wires.map(wire => (
-                        <WireComponent key={wire.id} wire={wire} gates={gates} customGates={customGates} value={wireValues.get(wire.id) || false} />
-                    ))}
+                        {wires.map(wire => (
+                            <WireComponent key={wire.id} wire={wire} gates={gates} customGates={customGates} value={wireValues.get(wire.id) || false} />
+                        ))}
 
-                    {connecting && (
-                        <line
-                            x1={getPortPosition(gates.find(g => g.id === connecting.from.gateId)!, 'output', connecting.from.portIndex, customGates[gates.find(g=>g.id===connecting.from.gateId)!.customGateName!]).x}
-                            y1={getPortPosition(gates.find(g => g.id === connecting.from.gateId)!, 'output', connecting.from.portIndex, customGates[gates.find(g=>g.id===connecting.from.gateId)!.customGateName!]).y}
-                            x2={connecting.mousePos.x}
-                            y2={connecting.mousePos.y}
-                            className="stroke-yellow-400 stroke-2"
-                        />
-                    )}
-
-                    {gates.map(gate => (
-                        <g key={gate.id} onClick={(e) => handleGateClick(e, gate.id)}>
-                            <GateComponent
-                                gate={gate}
-                                onDragStart={handleGateDragStart}
-                                onDrag={handleGateDrag}
-                                onDragEnd={handleGateDragEnd}
-                                onPortClick={handlePortClick}
-                                onPortDoubleClick={handlePortDoubleClick}
-                                onToggle={gate.type === 'INPUT' ? handleInputToggle : undefined}
-                                isSelected={selectedGateIds.includes(gate.id)}
-                                customGateDef={gate.type === 'CUSTOM' ? customGates[gate.customGateName!] : undefined}
+                        {connecting && (
+                            <line
+                                x1={getPortPosition(gates.find(g => g.id === connecting.from.gateId)!, 'output', connecting.from.portIndex, customGates[gates.find(g=>g.id===connecting.from.gateId)!.customGateName!]).x}
+                                y1={getPortPosition(gates.find(g => g.id === connecting.from.gateId)!, 'output', connecting.from.portIndex, customGates[gates.find(g=>g.id===connecting.from.gateId)!.customGateName!]).y}
+                                x2={connecting.mousePos.x}
+                                y2={connecting.mousePos.y}
+                                className="stroke-yellow-400 stroke-2"
                             />
-                        </g>
-                    ))}
-                    {selectionBox && (
-                        <rect
-                            x={selectionBox.x}
-                            y={selectionBox.y}
-                            width={selectionBox.width}
-                            height={selectionBox.height}
-                            className="fill-sky-500/20 stroke-sky-500 stroke-2 stroke-dashed"
-                        />
-                    )}
+                        )}
+
+                        {gates.map(gate => (
+                            <g key={gate.id} onClick={(e) => handleGateClick(e, gate.id)}>
+                                <GateComponent
+                                    gate={gate}
+                                    onDragStart={handleGateDragStart}
+                                    onDrag={handleGateDrag}
+                                    onDragEnd={handleGateDragEnd}
+                                    onPortClick={handlePortClick}
+                                    onPortDoubleClick={handlePortDoubleClick}
+                                    onToggle={gate.type === 'INPUT' ? handleInputToggle : undefined}
+                                    isSelected={selectedGateIds.includes(gate.id)}
+                                    customGateDef={gate.type === 'CUSTOM' ? customGates[gate.customGateName!] : undefined}
+                                />
+                            </g>
+                        ))}
+                        {selectionBox && (
+                            <rect
+                                x={selectionBox.x}
+                                y={selectionBox.y}
+                                width={selectionBox.width}
+                                height={selectionBox.height}
+                                className="fill-sky-500/20 stroke-sky-500 stroke-2 stroke-dashed"
+                            />
+                        )}
+                    </g>
                 </svg>
                 <div className="absolute top-4 right-4 bg-gray-900/80 p-4 rounded-lg text-sm flex flex-col gap-3 max-h-[80vh] overflow-y-auto">
                     <div>
