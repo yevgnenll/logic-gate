@@ -66,7 +66,6 @@ const useHistory = (initialState: AppState) => {
             if (JSON.stringify(newPresent) === JSON.stringify(currentHistory.present)) {
                 return currentHistory;
             }
-            // fromDragEnd is true only when a drag operation finishes
             if (fromDragEnd) {
                 return { ...currentHistory, present: newPresent };
             }
@@ -124,8 +123,7 @@ const getPortPosition = (gate: Gate | Omit<Gate, 'value'>, type: 'input' | 'outp
     const dimensions = isCustom ? { width: CUSTOM_GATE_WIDTH, height: Math.max(customGateDef.inputs.length, customGateDef.outputs.length) * 40 + 20 } : GATE_DIMENSIONS[gate.type as BaseGateType];
     const portCount = isCustom
         ? (type === 'input' ? customGateDef.inputs.length : customGateDef.outputs.length)
-        // Fallback for safety, though it shouldn't be needed with proper gate types
-        : (GATE_DIMENSIONS[gate.type as BaseGateType]?.inputs ?? 0);
+        : (type === 'input' ? GATE_DIMENSIONS[gate.type as BaseGateType].inputs : GATE_DIMENSIONS[gate.type as BaseGateType].outputs);
 
     if (portCount === 0) return {x:0, y:0};
     const spacing = dimensions.height / (portCount + 1);
@@ -138,7 +136,7 @@ const getPortPosition = (gate: Gate | Omit<Gate, 'value'>, type: 'input' | 'outp
 
 // --- 컴포넌트 ---
 
-const GateComponent = React.memo(({ gate, onDragStart, onDrag, onDragEnd, onPortClick, onPortDoubleClick, onClick, isSelected, customGateDef }: {
+const GateComponent = React.memo(({ gate, onDragStart, onDrag, onDragEnd, onPortClick, onPortDoubleClick, onClick, isSelected, customGateDef, isReadOnly }: {
     gate: Gate;
     onDragStart: (gateId: string, e: React.MouseEvent) => void;
     onDrag: (dragDelta: { dx: number; dy: number }) => void;
@@ -148,6 +146,7 @@ const GateComponent = React.memo(({ gate, onDragStart, onDrag, onDragEnd, onPort
     onClick: (e: React.MouseEvent, gateId: string) => void;
     isSelected: boolean;
     customGateDef?: CustomGateTemplate;
+    isReadOnly: boolean;
 }) => {
     const isCustom = gate.type === 'CUSTOM';
     const dimensions = isCustom && customGateDef
@@ -156,6 +155,7 @@ const GateComponent = React.memo(({ gate, onDragStart, onDrag, onDragEnd, onPort
 
 
     const handleMouseDown = (e: React.MouseEvent) => {
+        if (isReadOnly) return;
         onDragStart(gate.id, e);
         const startPos = { x: e.clientX, y: e.clientY };
 
@@ -165,7 +165,7 @@ const GateComponent = React.memo(({ gate, onDragStart, onDrag, onDragEnd, onPort
             onDrag({ dx, dy });
         };
 
-        const handleMouseUp = (e: MouseEvent) => {
+        const handleMouseUp = () => {
             onDragEnd();
             document.removeEventListener('mousemove', handleMouseMove);
             document.removeEventListener('mouseup', handleMouseUp);
@@ -189,9 +189,9 @@ const GateComponent = React.memo(({ gate, onDragStart, onDrag, onDragEnd, onPort
                         cx={pos.x - gate.position.x}
                         cy={pos.y - gate.position.y}
                         r={PORT_RADIUS}
-                        className={`cursor-pointer transition-colors ${portValue ? 'fill-sky-400' : 'fill-gray-400' } hover:fill-yellow-400`}
-                        onClick={(e) => { e.stopPropagation(); onPortClick(gate.id, portType, i); }}
-                        onDoubleClick={(e) => { if (portType === 'input') { e.stopPropagation(); onPortDoubleClick(e, gate.id, i); }}}
+                        className={`transition-colors ${portValue ? 'fill-sky-400' : 'fill-gray-400' } ${!isReadOnly && 'hover:fill-yellow-400 cursor-pointer'}`}
+                        onClick={(e) => { if (!isReadOnly) { e.stopPropagation(); onPortClick(gate.id, portType, i); } }}
+                        onDoubleClick={(e) => { if (!isReadOnly && portType === 'input') { e.stopPropagation(); onPortDoubleClick(e, gate.id, i); }}}
                     />
                 </g>
             );
@@ -202,7 +202,7 @@ const GateComponent = React.memo(({ gate, onDragStart, onDrag, onDragEnd, onPort
     const fillStyle = gate.value ? 'fill-sky-400' : 'fill-gray-700';
 
     return (
-        <g transform={`translate(${gate.position.x}, ${gate.position.y})`} onMouseDown={handleMouseDown} onClick={(e) => onClick(e, gate.id)} className="cursor-move select-none">
+        <g transform={`translate(${gate.position.x}, ${gate.position.y})`} onMouseDown={handleMouseDown} onClick={(e) => onClick(e, gate.id)} className={!isReadOnly ? 'cursor-move select-none' : 'select-none'}>
             {gate.type === 'CUSTOM' && (
                 <rect width={dimensions.width} height={dimensions.height} rx="10" className={`${fillStyle} ${gateBodyStyle}`} />
             )}
@@ -246,14 +246,42 @@ const WireComponent = React.memo(({ wire, gates, customGates, value }: { wire: W
 });
 
 export default function App() {
-    const { state, setState, setPresentState, undo, redo, canUndo, canRedo } = useHistory({
-        gates: [
-            { id: 'input1', type: 'INPUT', position: { x: 50, y: 50 }, value: false, name: 'A' },
-            { id: 'input2', type: 'INPUT', position: { x: 50, y: 200 }, value: false, name: 'B' },
-            { id: 'output1', type: 'OUTPUT', position: { x: 600, y: 125 }, value: false, name: 'Result' },
-        ],
-        wires: [],
-    });
+    const [isReadOnly, setIsReadOnly] = useState(false);
+    const { state, setState, setPresentState, undo, redo, canUndo, canRedo } = useHistory({ gates: [], wires: [] });
+
+    useEffect(() => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const viewData = urlParams.get('view');
+        if (viewData) {
+            try {
+                const decoded = JSON.parse(atob(viewData));
+                setState(decoded, true);
+                setIsReadOnly(true);
+            } catch (e) {
+                console.error("Failed to parse view data from URL", e);
+                // Load default state if parsing fails
+                setState({
+                    gates: [
+                        { id: 'input1', type: 'INPUT', position: { x: 50, y: 50 }, value: false, name: 'A' },
+                        { id: 'output1', type: 'OUTPUT', position: { x: 300, y: 50 }, value: false, name: 'Result' },
+                    ],
+                    wires: []
+                }, true);
+            }
+        } else {
+            // Load default state for editor mode
+            setState({
+                gates: [
+                    { id: 'input1', type: 'INPUT', position: { x: 50, y: 50 }, value: false, name: 'A' },
+                    { id: 'input2', type: 'INPUT', position: { x: 50, y: 200 }, value: false, name: 'B' },
+                    { id: 'output1', type: 'OUTPUT', position: { x: 600, y: 125 }, value: false, name: 'Result' },
+                ],
+                wires: [],
+            }, true);
+        }
+    }, []); // This effect runs only once on mount
+
+
     const { gates, wires } = state;
     const dragInfoRef = useRef<{startPositions: Map<string, {x:number, y:number}>, dragIds: string[], hasDragged: boolean} | null>(null);
     const selectionStartPoint = useRef<{x: number, y: number} | null>(null);
@@ -267,9 +295,11 @@ export default function App() {
     const [selectionBox, setSelectionBox] = useState<{x: number, y: number, width: number, height: number} | null>(null);
     const [viewTransform, setViewTransform] = useState<ViewTransform>({ x: 0, y: 0, k: 1 });
     const [isPanning, setIsPanning] = useState(false);
+    const [showShareModal, setShowShareModal] = useState(false);
+    const [embedCode, setEmbedCode] = useState("");
 
-    useEffect(() => { try { const saved = localStorage.getItem('customLogicGates'); if (saved) { setCustomGates(JSON.parse(saved)); } } catch (error) { console.error("Failed to load custom gates", error); } }, []);
-    useEffect(() => { try { localStorage.setItem('customLogicGates', JSON.stringify(customGates)); } catch (error) { console.error("Failed to save custom gates", error); } }, [customGates]);
+    useEffect(() => { if(!isReadOnly) { try { const saved = localStorage.getItem('customLogicGates'); if (saved) { setCustomGates(JSON.parse(saved)); } } catch (error) { console.error("Failed to load custom gates", error); } } }, [isReadOnly]);
+    useEffect(() => { if(!isReadOnly) { try { localStorage.setItem('customLogicGates', JSON.stringify(customGates)); } catch (error) { console.error("Failed to save custom gates", error); } } }, [customGates, isReadOnly]);
 
     const addGate = (type: BaseGateType) => {
         const newGate: Gate = { id: `${type}-${Date.now()}`, type, position: { x: (250 - viewTransform.x) / viewTransform.k, y: (150 - viewTransform.y) / viewTransform.k }, value: false, };
@@ -360,6 +390,7 @@ export default function App() {
             e.preventDefault();
             return;
         }
+        if (isReadOnly) return;
         setConnecting(null);
         if(!e.shiftKey) {
             setSelectedGateIds([]);
@@ -433,19 +464,22 @@ export default function App() {
         const gate = gates.find(g => g.id === gateId);
         if (!gate) return;
 
+        if (gate.type === 'INPUT') {
+            handleInputToggle(gateId);
+        }
+
+        if (isReadOnly) return;
+
         if (e.shiftKey) {
             setSelectedGateIds(prev => prev.includes(gateId) ? prev.filter(id => id !== gateId) : [...prev, gateId]);
         } else {
             setSelectedGateIds([gateId]);
         }
-
-        if (gate.type === 'INPUT') {
-            handleInputToggle(gateId);
-        }
     };
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
+            if (isReadOnly) return;
             const target = e.target as HTMLElement;
             if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
             const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
@@ -459,7 +493,7 @@ export default function App() {
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [selectedGateIds, setState, undo, redo]);
+    }, [selectedGateIds, setState, undo, redo, isReadOnly]);
 
     // Logic simulation
     useEffect(() => {
@@ -602,6 +636,16 @@ export default function App() {
     };
 
     const handleDeleteCustomGate = (name: string) => { setCustomGates(prev => { const newCustomGates = {...prev}; delete newCustomGates[name]; return newCustomGates; }); };
+
+    const handleShare = () => {
+        const data = { gates, wires };
+        const base64 = btoa(JSON.stringify(data));
+        const url = `${window.location.origin}${window.location.pathname}?view=${base64}`;
+        const code = `<iframe src="${url}" width="100%" height="500" style="border:1px solid #ccc; border-radius: 8px;" allowfullscreen></iframe>`;
+        setEmbedCode(code);
+        setShowShareModal(true);
+    };
+
     const wireValues = useMemo(() => {
         const values = new Map<string, boolean>();
         wires.forEach(wire => {
@@ -636,16 +680,19 @@ export default function App() {
         <div className="w-screen h-screen bg-gray-800 flex flex-col font-sans text-white overflow-hidden">
             <header className="bg-gray-900 p-3 shadow-lg z-10 flex items-center justify-between flex-wrap gap-2">
                 <h1 className="text-xl font-bold text-sky-400">Logic Gate Simulator</h1>
-                <div className="flex items-center gap-2 flex-wrap">
-                    <button onClick={() => addGate('INPUT')} className="bg-green-500 hover:bg-green-600 px-3 py-1 rounded-md font-semibold transition-colors">Add INPUT</button>
-                    <button onClick={() => addGate('OUTPUT')} className="bg-purple-500 hover:bg-purple-600 px-3 py-1 rounded-md font-semibold transition-colors">Add OUTPUT</button>
-                    <button onClick={() => addGate('AND')} className="bg-sky-500 hover:bg-sky-600 px-3 py-1 rounded-md font-semibold transition-colors">Add AND</button>
-                    <button onClick={() => addGate('OR')} className="bg-teal-500 hover:bg-teal-600 px-3 py-1 rounded-md font-semibold transition-colors">Add OR</button>
-                    <button onClick={() => addGate('NOT')} className="bg-indigo-500 hover:bg-indigo-600 px-3 py-1 rounded-md font-semibold transition-colors">Add NOT</button>
-                    <button onClick={() => setState({gates: [], wires: []})} className="bg-red-500 hover:bg-red-600 px-3 py-1 rounded-md font-semibold transition-colors">Reset</button>
-                    <button onClick={undo} disabled={!canUndo} className="disabled:opacity-50 disabled:cursor-not-allowed bg-gray-600 hover:bg-gray-700 px-3 py-1 rounded-md font-semibold transition-colors">Undo</button>
-                    <button onClick={redo} disabled={!canRedo} className="disabled:opacity-50 disabled:cursor-not-allowed bg-gray-600 hover:bg-gray-700 px-3 py-1 rounded-md font-semibold transition-colors">Redo</button>
-                </div>
+                {!isReadOnly && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <button onClick={() => addGate('INPUT')} className="bg-green-500 hover:bg-green-600 px-3 py-1 rounded-md font-semibold transition-colors">Add INPUT</button>
+                        <button onClick={() => addGate('OUTPUT')} className="bg-purple-500 hover:bg-purple-600 px-3 py-1 rounded-md font-semibold transition-colors">Add OUTPUT</button>
+                        <button onClick={() => addGate('AND')} className="bg-sky-500 hover:bg-sky-600 px-3 py-1 rounded-md font-semibold transition-colors">Add AND</button>
+                        <button onClick={() => addGate('OR')} className="bg-teal-500 hover:bg-teal-600 px-3 py-1 rounded-md font-semibold transition-colors">Add OR</button>
+                        <button onClick={() => addGate('NOT')} className="bg-indigo-500 hover:bg-indigo-600 px-3 py-1 rounded-md font-semibold transition-colors">Add NOT</button>
+                        <button onClick={() => setState({gates: [], wires: []})} className="bg-red-500 hover:bg-red-600 px-3 py-1 rounded-md font-semibold transition-colors">Reset</button>
+                        <button onClick={undo} disabled={!canUndo} className="disabled:opacity-50 disabled:cursor-not-allowed bg-gray-600 hover:bg-gray-700 px-3 py-1 rounded-md font-semibold transition-colors">Undo</button>
+                        <button onClick={redo} disabled={!canRedo} className="disabled:opacity-50 disabled:cursor-not-allowed bg-gray-600 hover:bg-gray-700 px-3 py-1 rounded-md font-semibold transition-colors">Redo</button>
+                        <button onClick={handleShare} className="bg-blue-500 hover:bg-blue-600 px-3 py-1 rounded-md font-semibold transition-colors">Share</button>
+                    </div>
+                )}
             </header>
 
             <main className="flex-grow relative">
@@ -664,7 +711,7 @@ export default function App() {
                                 <path d={`M 20 0 L 0 0 0 20`} fill="none" stroke="rgba(128,128,128,0.2)" strokeWidth="1"/>
                             </pattern>
                         </defs>
-                        <rect x={-viewTransform.x / viewTransform.k} y={-viewTransform.y / viewTransform.k} width="100vw" height="100vh" className="scale-[2]" fill="url(#grid)" />
+                        <rect x={-viewTransform.x / viewTransform.k} y={-viewTransform.y / viewTransform.k} width="200%" height="200%" fill="url(#grid)" />
 
                         {wires.map(wire => (
                             <WireComponent key={wire.id} wire={wire} gates={gates} customGates={customGates} value={wireValues.get(wire.id) || false} />
@@ -692,6 +739,7 @@ export default function App() {
                                 onClick={handleGateClick}
                                 isSelected={selectedGateIds.includes(gate.id)}
                                 customGateDef={gate.type === 'CUSTOM' ? customGates[gate.customGateName!] : undefined}
+                                isReadOnly={isReadOnly}
                             />
                         ))}
                         {selectionBox && (
@@ -705,53 +753,72 @@ export default function App() {
                         )}
                     </g>
                 </svg>
-                <div className="absolute top-4 right-4 bg-gray-900/80 p-4 rounded-lg text-sm flex flex-col gap-3 max-h-[80vh] overflow-y-auto">
-                    <div>
-                        <h2 className="text-lg font-bold text-amber-400 mb-2">Custom Gates</h2>
-                        <div className="flex flex-col gap-2">
-                            {Object.keys(customGates).length === 0 && <p className="text-gray-400">No custom gates saved yet.</p>}
-                            {Object.keys(customGates).map(name => (
-                                <div key={name} className="flex items-center justify-between gap-2 bg-gray-800 p-2 rounded">
-                                    <button onClick={() => handleAddCustomGate(name)} className="flex-grow text-left font-semibold text-white hover:text-amber-400 transition-colors">{name}</button>
-                                    <button onClick={() => handleDeleteCustomGate(name)} className="text-red-500 hover:text-red-400 font-bold px-2">✕</button>
+                {!isReadOnly && (
+                    <>
+                        <div className="absolute top-4 right-4 bg-gray-900/80 p-4 rounded-lg text-sm flex flex-col gap-3 max-h-[80vh] overflow-y-auto">
+                            <div>
+                                <h2 className="text-lg font-bold text-amber-400 mb-2">Custom Gates</h2>
+                                <div className="flex flex-col gap-2">
+                                    {Object.keys(customGates).length === 0 && <p className="text-gray-400">No custom gates saved yet.</p>}
+                                    {Object.keys(customGates).map(name => (
+                                        <div key={name} className="flex items-center justify-between gap-2 bg-gray-800 p-2 rounded">
+                                            <button onClick={() => handleAddCustomGate(name)} className="flex-grow text-left font-semibold text-white hover:text-amber-400 transition-colors">{name}</button>
+                                            <button onClick={() => handleDeleteCustomGate(name)} className="text-red-500 hover:text-red-400 font-bold px-2">✕</button>
+                                        </div>
+                                    ))}
                                 </div>
-                            ))}
-                        </div>
-                    </div>
-                    {selectedGateIds.length > 0 && (
-                        <div>
-                            <h2 className="text-lg font-bold text-green-400 mb-2">Save Selection</h2>
-                            <p className="text-xs text-gray-400 mb-2">Include INPUT/OUTPUT gates in selection to define ports.</p>
-                            <div className="flex items-center gap-2">
-                                <input
-                                    type="text"
-                                    value={customGateName}
-                                    onChange={(e) => setCustomGateName(e.target.value)}
-                                    onKeyDown={(e) => { if (e.key === 'Enter') handleSaveCustomGate(); }}
-                                    placeholder="Gate Name (e.g. NAND)"
-                                    className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
-                                    onClick={e => e.stopPropagation()}
-                                />
-                                <button onClick={handleSaveCustomGate} className={`px-3 py-1 rounded-md font-semibold transition-colors ${isUpdating ? 'bg-amber-600 hover:bg-amber-700' : 'bg-green-600 hover:bg-green-700'}`}>
-                                    {isUpdating ? 'Update' : 'Save'}
-                                </button>
                             </div>
+                            {selectedGateIds.length > 0 && (
+                                <div>
+                                    <h2 className="text-lg font-bold text-green-400 mb-2">Save Selection</h2>
+                                    <p className="text-xs text-gray-400 mb-2">Include INPUT/OUTPUT gates in selection to define ports.</p>
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="text"
+                                            value={customGateName}
+                                            onChange={(e) => setCustomGateName(e.target.value)}
+                                            onKeyDown={(e) => { if (e.key === 'Enter') handleSaveCustomGate(); }}
+                                            placeholder="Gate Name (e.g. NAND)"
+                                            className="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
+                                            onClick={e => e.stopPropagation()}
+                                        />
+                                        <button onClick={handleSaveCustomGate} className={`px-3 py-1 rounded-md font-semibold transition-colors ${isUpdating ? 'bg-amber-600 hover:bg-amber-700' : 'bg-green-600 hover:bg-green-700'}`}>
+                                            {isUpdating ? 'Update' : 'Save'}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
                         </div>
-                    )}
-                </div>
-                <div className="absolute bottom-4 left-4 bg-gray-900/80 p-3 rounded-lg text-sm flex flex-col gap-1">
-                    <p><strong className="text-sky-400">How to use:</strong></p>
-                    <p>• Drag on canvas to select multiple gates.</p>
-                    <p>• <kbd>Cmd/Ctrl + Z</kbd> to Undo, <kbd>Cmd/Ctrl + Y</kbd> to Redo.</p>
-                    <p>• Double-click a connected input port to move the wire.</p>
-                    <p>• <kbd>Shift</kbd> + Click to add/remove from selection.</p>
-                    <p>• Select gates and press <kbd>Delete</kbd> to remove them.</p>
-                </div>
+                        <div className="absolute bottom-4 left-4 bg-gray-900/80 p-3 rounded-lg text-sm flex flex-col gap-1">
+                            <p><strong className="text-sky-400">How to use:</strong></p>
+                            <p>• Drag on canvas to select multiple gates.</p>
+                            <p>• <kbd>Cmd/Ctrl + Z</kbd> to Undo, <kbd>Cmd/Ctrl + Y</kbd> to Redo.</p>
+                            <p>• Double-click a connected input port to move the wire.</p>
+                            <p>• <kbd>Shift</kbd> + Click to add/remove from selection.</p>
+                            <p>• Select gates and press <kbd>Delete</kbd> to remove them.</p>
+                        </div>
+                    </>
+                )}
                 <div className="absolute bottom-4 right-4 bg-gray-900/80 p-1 rounded-lg flex items-center gap-1 text-white text-xs">
                     <button onClick={() => handleZoom('out')} className="w-7 h-7 font-bold text-lg flex items-center justify-center hover:bg-gray-700 rounded">-</button>
                     <button onClick={() => handleZoom('reset')} className="w-14 h-7 hover:bg-gray-700 rounded">{Math.round(viewTransform.k * 100)}%</button>
                     <button onClick={() => handleZoom('in')} className="w-7 h-7 font-bold text-lg flex items-center justify-center hover:bg-gray-700 rounded">+</button>
                 </div>
+                {showShareModal && (
+                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center" onClick={() => setShowShareModal(false)}>
+                        <div className="bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-2xl" onClick={e => e.stopPropagation()}>
+                            <h2 className="text-xl font-bold mb-4 text-sky-400">Embed Circuit</h2>
+                            <p className="text-sm text-gray-300 mb-4">Copy this code and paste it into your blog or website's HTML to embed this circuit.</p>
+                            <textarea
+                                readOnly
+                                value={embedCode}
+                                className="w-full h-32 p-2 bg-gray-900 text-gray-200 border border-gray-700 rounded-md font-mono text-sm"
+                                onFocus={e => e.target.select()}
+                            />
+                            <button onClick={() => setShowShareModal(false)} className="mt-4 bg-sky-500 hover:bg-sky-600 px-4 py-2 rounded-md font-semibold transition-colors">Close</button>
+                        </div>
+                    </div>
+                )}
             </main>
         </div>
     );
