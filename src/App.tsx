@@ -60,13 +60,14 @@ const useHistory = (initialState: AppState) => {
         future: [] as AppState[],
     });
 
-    const setState = useCallback((newState: AppState | ((prevState: AppState) => AppState), fromDrag: boolean = false) => {
+    const setState = useCallback((newState: AppState | ((prevState: AppState) => AppState), fromDragEnd: boolean = false) => {
         setHistory(currentHistory => {
             const newPresent = typeof newState === 'function' ? newState(currentHistory.present) : newState;
             if (JSON.stringify(newPresent) === JSON.stringify(currentHistory.present)) {
                 return currentHistory;
             }
-            if (fromDrag) {
+            // fromDragEnd is true only when a drag operation finishes
+            if (fromDragEnd) {
                 return { ...currentHistory, present: newPresent };
             }
             return {
@@ -138,7 +139,7 @@ const getPortPosition = (gate: Gate | Omit<Gate, 'value'>, type: 'input' | 'outp
 
 const GateComponent = React.memo(({ gate, onDragStart, onDrag, onDragEnd, onPortClick, onPortDoubleClick, onToggle, isSelected, customGateDef }: {
     gate: Gate;
-    onDragStart: (gateId: string) => void;
+    onDragStart: (gateId: string, e: React.MouseEvent) => void;
     onDrag: (dragDelta: { dx: number; dy: number }) => void;
     onDragEnd: () => void;
     onPortClick: (gateId: string, portType: 'input' | 'output', portIndex: number) => void;
@@ -155,7 +156,7 @@ const GateComponent = React.memo(({ gate, onDragStart, onDrag, onDragEnd, onPort
 
     const handleMouseDown = (e: React.MouseEvent) => {
         e.stopPropagation();
-        onDragStart(gate.id);
+        onDragStart(gate.id, e);
         const startPos = { x: e.clientX, y: e.clientY };
 
         const handleMouseMove = (moveE: MouseEvent) => {
@@ -214,7 +215,7 @@ const GateComponent = React.memo(({ gate, onDragStart, onDrag, onDragEnd, onPort
                 {gate.type === 'INPUT' ? (gate.value ? 'ON' : 'OFF') : gate.name || gate.type}
             </text>
 
-            {gate.type === 'INPUT' && onToggle && ( <rect width={dimensions.width} height={dimensions.height} rx="10" className="fill-transparent cursor-pointer" onClick={() => onToggle(gate.id)} /> )}
+            {gate.type === 'INPUT' && onToggle && ( <rect width={dimensions.width} height={dimensions.height} rx="10" className="fill-transparent cursor-pointer" /> )}
 
             {renderPorts('input')}
             {renderPorts('output')}
@@ -256,7 +257,7 @@ export default function App() {
         wires: [],
     });
     const { gates, wires } = state;
-    const dragInfoRef = useRef<{startPositions: Map<string, {x:number, y:number}>, dragIds: string[]} | null>(null);
+    const dragInfoRef = useRef<{startPositions: Map<string, {x:number, y:number}>, dragIds: string[], hasDragged: boolean} | null>(null);
     const selectionStartPoint = useRef<{x: number, y: number} | null>(null);
     const panStartRef = useRef<{x: number, y: number} | null>(null);
 
@@ -284,11 +285,14 @@ export default function App() {
                 startPositions.set(g.id, g.position);
             }
         });
-        dragInfoRef.current = { startPositions, dragIds };
+        dragInfoRef.current = { startPositions, dragIds, hasDragged: false };
     }, [selectedGateIds, gates]);
 
     const handleGateDrag = useCallback((dragDelta: { dx: number; dy: number }) => {
         if (!dragInfoRef.current) return;
+        if (!dragInfoRef.current.hasDragged && (Math.abs(dragDelta.dx) > 3 || Math.abs(dragDelta.dy) > 3)) {
+            dragInfoRef.current.hasDragged = true;
+        }
         const { startPositions, dragIds } = dragInfoRef.current;
         setPresentState(s => ({
             ...s,
@@ -303,9 +307,10 @@ export default function App() {
     }, [setPresentState, viewTransform.k]);
 
     const handleGateDragEnd = useCallback(() => {
-        if (!dragInfoRef.current) return;
+        if (dragInfoRef.current?.hasDragged) {
+            setState(s => ({...s}), true); // Record history after drag ends
+        }
         dragInfoRef.current = null;
-        setState(s => ({...s}), true); // Record history after drag ends
     }, [setState]);
 
     const handleInputToggle = useCallback((id: string) => { setState(s => ({ ...s, gates: s.gates.map(g => (g.id === id && g.type === 'INPUT') ? { ...g, value: !g.value } : g) })); }, [setState]);
@@ -356,7 +361,6 @@ export default function App() {
             e.preventDefault();
             return;
         }
-        if (e.target !== e.currentTarget) return;
         setConnecting(null);
         if(!e.shiftKey) {
             setSelectedGateIds([]);
@@ -425,7 +429,7 @@ export default function App() {
 
     const handleGateClick = (e: React.MouseEvent, gateId: string) => {
         e.stopPropagation();
-        if (dragInfoRef.current) return;
+        if (dragInfoRef.current?.hasDragged) return;
 
         const gate = gates.find(g => g.id === gateId);
         if (!gate) return;
@@ -639,8 +643,8 @@ export default function App() {
                 >
                     <g transform={`translate(${viewTransform.x}, ${viewTransform.y}) scale(${viewTransform.k})`}>
                         <defs>
-                            <pattern id="grid" width={20 * viewTransform.k} height={20 * viewTransform.k} patternUnits="userSpaceOnUse">
-                                <path d={`M ${20 * viewTransform.k} 0 L 0 0 0 ${20 * viewTransform.k}`} fill="none" stroke="rgba(128,128,128,0.2)" strokeWidth="1"/>
+                            <pattern id="grid" width={20} height={20} patternUnits="userSpaceOnUse">
+                                <path d={`M 20 0 L 0 0 0 20`} fill="none" stroke="rgba(128,128,128,0.2)" strokeWidth="1"/>
                             </pattern>
                         </defs>
                         <rect x={-viewTransform.x / viewTransform.k} y={-viewTransform.y / viewTransform.k} width="100%" height="100%" fill="url(#grid)" />
