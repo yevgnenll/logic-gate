@@ -33,6 +33,7 @@ interface CustomGateTemplate {
     wires: Omit<Wire, 'id'>[];
     inputs: { originalId: string, name?: string }[];
     outputs: { originalId: string, name?: string }[];
+    color: string; // Color for the custom gate
 }
 
 interface ViewTransform {
@@ -51,6 +52,7 @@ const GATE_DIMENSIONS: Record<BaseGateType, { width: number; height: number; inp
 };
 const PORT_RADIUS = 8;
 const CUSTOM_GATE_WIDTH = 150;
+const PALETTE_COLORS = ['#64748b', '#38bdf8', '#34d399', '#f59e0b', '#f43f5e']; // Slate, Sky, Emerald, Amber, Rose
 
 // --- 실행 취소/다시 실행을 위한 커스텀 훅 ---
 const useHistory = (initialState: AppState) => {
@@ -194,7 +196,7 @@ const GateComponent = React.memo(({ gate, onDragStart, onDrag, onDragEnd, onPort
                     <circle
                         cx={pos.x - gate.position.x}
                         cy={pos.y - gate.position.y}
-                        r={PORT_RADIUS * 1.8}
+                        r={PORT_RADIUS * 2.5}
                         className={`fill-transparent ${!isReadOnly && 'cursor-pointer'}`}
                         onClick={(e) => { if (!isReadOnly) { e.stopPropagation(); onPortClick(gate.id, portType, i); } }}
                         onDoubleClick={(e) => { if (!isReadOnly && portType === 'input') { e.stopPropagation(); onPortDoubleClick(e, gate.id, i); }}}
@@ -205,17 +207,17 @@ const GateComponent = React.memo(({ gate, onDragStart, onDrag, onDragEnd, onPort
     };
 
     const gateBodyStyle = `stroke-2 transition-colors duration-300 ${isSelected ? 'stroke-yellow-400' : 'stroke-gray-400'}`;
-    const fillStyle = gate.value ? 'fill-sky-400' : 'fill-gray-700';
+    const fillStyle = gate.value ? 'fill-sky-400' : (customGateDef?.color || '#4b5563'); // Use custom color or default gray
 
     return (
         <g transform={`translate(${gate.position.x}, ${gate.position.y})`} onMouseDown={handleMouseDown} onClick={(e) => onClick(e, gate.id)} className={`gate-component-group ${!isReadOnly ? 'cursor-move select-none' : 'select-none'}`}>
             {gate.type === 'CUSTOM' && (
-                <rect width={dimensions.width} height={dimensions.height} rx="10" className={`${fillStyle} ${gateBodyStyle}`} />
+                <rect width={dimensions.width} height={dimensions.height} rx="10" className={`${gateBodyStyle}`} style={{ fill: fillStyle }} />
             )}
-            {gate.type === 'AND' && ( <path d={`M0,0 L0,${dimensions.height} L${dimensions.width/2},${dimensions.height} A${dimensions.width/2},${dimensions.height/2} 0 0 0 ${dimensions.width/2},0 L0,0 Z`} className={`${fillStyle} ${gateBodyStyle}`} /> )}
-            {gate.type === 'OR' && ( <path d={`M0,0 Q${dimensions.width/2},${dimensions.height/2} 0,${dimensions.height} L${dimensions.width*0.7},${dimensions.height} A${dimensions.width*0.7},${dimensions.height/2} 0 0 0 ${dimensions.width*0.7},0 L0,0 Z`} className={`${fillStyle} ${gateBodyStyle}`} /> )}
-            {gate.type === 'NOT' && ( <> <path d={`M0,0 L${dimensions.width - PORT_RADIUS},${dimensions.height/2} L0,${dimensions.height} Z`} className={`${fillStyle} ${gateBodyStyle}`} /> <circle cx={dimensions.width} cy={dimensions.height/2} r={PORT_RADIUS} className={`${fillStyle} ${gateBodyStyle}`} /> </> )}
-            {(gate.type === 'INPUT' || gate.type === 'OUTPUT') && ( <rect width={dimensions.width} height={dimensions.height} rx="10" className={`${fillStyle} ${gateBodyStyle}`} /> )}
+            {gate.type === 'AND' && ( <path d={`M0,0 L0,${dimensions.height} L${dimensions.width/2},${dimensions.height} A${dimensions.width/2},${dimensions.height/2} 0 0 0 ${dimensions.width/2},0 L0,0 Z`} className={`${gateBodyStyle}`} style={{ fill: fillStyle }} /> )}
+            {gate.type === 'OR' && ( <path d={`M0,0 Q${dimensions.width/2},${dimensions.height/2} 0,${dimensions.height} L${dimensions.width*0.7},${dimensions.height} A${dimensions.width*0.7},${dimensions.height/2} 0 0 0 ${dimensions.width*0.7},0 L0,0 Z`} className={`${gateBodyStyle}`} style={{ fill: fillStyle }} /> )}
+            {gate.type === 'NOT' && ( <> <path d={`M0,0 L${dimensions.width - PORT_RADIUS},${dimensions.height/2} L0,${dimensions.height} Z`} className={`${gateBodyStyle}`} style={{ fill: fillStyle }} /> <circle cx={dimensions.width} cy={dimensions.height/2} r={PORT_RADIUS} className={`${gateBodyStyle}`} style={{ fill: fillStyle }} /> </> )}
+            {(gate.type === 'INPUT' || gate.type === 'OUTPUT') && ( <rect width={dimensions.width} height={dimensions.height} rx="10" className={`${gateBodyStyle}`} style={{ fill: fillStyle }} /> )}
 
             <text x={dimensions.width / 2} y={dimensions.height / 2 + 5} textAnchor="middle" className="fill-white font-bold text-sm pointer-events-none">
                 {gate.type === 'INPUT' ? (gate.value ? 'ON' : 'OFF') : gate.name || gate.type}
@@ -305,6 +307,7 @@ export default function App() {
             return {};
         }
     });
+    const [selectedColor, setSelectedColor] = useState(PALETTE_COLORS[0]);
     const [selectionBox, setSelectionBox] = useState<{x: number, y: number, width: number, height: number} | null>(null);
     const [viewTransform, setViewTransform] = useState<ViewTransform>({ x: 0, y: 0, k: 1 });
     const [isPanning, setIsPanning] = useState(false);
@@ -642,7 +645,8 @@ export default function App() {
             gates: [...internalGates, ...selection.filter(g => g.type === 'INPUT' || g.type === 'OUTPUT')].map(({value, ...g}) => ({ ...g, position: { x: g.position.x - minX, y: g.position.y - minY }})),
             wires: internalWires.map(({id, ...w}) => w),
             inputs,
-            outputs
+            outputs,
+            color: selectedColor,
         };
 
         setCustomGates(prev => ({...prev, [name]: template}));
@@ -816,6 +820,11 @@ export default function App() {
                                         <button onClick={handleSaveCustomGate} className={`px-3 py-1 rounded-md font-semibold transition-colors ${isUpdating ? 'bg-amber-600 hover:bg-amber-700' : 'bg-green-600 hover:bg-green-700'}`}>
                                             {isUpdating ? 'Update' : 'Save'}
                                         </button>
+                                    </div>
+                                    <div className="flex items-center gap-2 mt-2">
+                                        {PALETTE_COLORS.map(color => (
+                                            <button key={color} onClick={() => setSelectedColor(color)} className={`w-6 h-6 rounded-full transition-all ${selectedColor === color ? 'ring-2 ring-offset-2 ring-offset-gray-800 ring-white' : ''}`} style={{backgroundColor: color}} />
+                                        ))}
                                     </div>
                                 </div>
                             )}
