@@ -207,17 +207,19 @@ const GateComponent = React.memo(({ gate, onDragStart, onDrag, onDragEnd, onPort
     };
 
     const gateBodyStyle = `stroke-2 transition-colors duration-300 ${isSelected ? 'stroke-yellow-400' : 'stroke-gray-400'}`;
-    const fillStyle = gate.value ? 'fill-sky-400' : (customGateDef?.color || '#4b5563'); // Use custom color or default gray
+    const baseFillColor = customGateDef?.color || '#4b5563'; // Gray-700 equivalent
+    const activeFillColor = '#38bdf8'; // Sky-400 equivalent
+    const currentFillColor = gate.value ? activeFillColor : baseFillColor;
 
     return (
         <g transform={`translate(${gate.position.x}, ${gate.position.y})`} onMouseDown={handleMouseDown} onClick={(e) => onClick(e, gate.id)} className={`gate-component-group ${!isReadOnly ? 'cursor-move select-none' : 'select-none'}`}>
             {gate.type === 'CUSTOM' && (
-                <rect width={dimensions.width} height={dimensions.height} rx="10" className={`${gateBodyStyle}`} style={{ fill: fillStyle }} />
+                <rect width={dimensions.width} height={dimensions.height} rx="10" className={`${gateBodyStyle}`} style={{ fill: currentFillColor }} />
             )}
-            {gate.type === 'AND' && ( <path d={`M0,0 L0,${dimensions.height} L${dimensions.width/2},${dimensions.height} A${dimensions.width/2},${dimensions.height/2} 0 0 0 ${dimensions.width/2},0 L0,0 Z`} className={`${gateBodyStyle}`} style={{ fill: fillStyle }} /> )}
-            {gate.type === 'OR' && ( <path d={`M0,0 Q${dimensions.width/2},${dimensions.height/2} 0,${dimensions.height} L${dimensions.width*0.7},${dimensions.height} A${dimensions.width*0.7},${dimensions.height/2} 0 0 0 ${dimensions.width*0.7},0 L0,0 Z`} className={`${gateBodyStyle}`} style={{ fill: fillStyle }} /> )}
-            {gate.type === 'NOT' && ( <> <path d={`M0,0 L${dimensions.width - PORT_RADIUS},${dimensions.height/2} L0,${dimensions.height} Z`} className={`${gateBodyStyle}`} style={{ fill: fillStyle }} /> <circle cx={dimensions.width} cy={dimensions.height/2} r={PORT_RADIUS} className={`${gateBodyStyle}`} style={{ fill: fillStyle }} /> </> )}
-            {(gate.type === 'INPUT' || gate.type === 'OUTPUT') && ( <rect width={dimensions.width} height={dimensions.height} rx="10" className={`${gateBodyStyle}`} style={{ fill: fillStyle }} /> )}
+            {gate.type === 'AND' && ( <path d={`M0,0 L0,${dimensions.height} L${dimensions.width/2},${dimensions.height} A${dimensions.width/2},${dimensions.height/2} 0 0 0 ${dimensions.width/2},0 L0,0 Z`} className={`${gateBodyStyle}`} style={{ fill: currentFillColor }} /> )}
+            {gate.type === 'OR' && ( <path d={`M0,0 Q${dimensions.width/2},${dimensions.height/2} 0,${dimensions.height} L${dimensions.width*0.7},${dimensions.height} A${dimensions.width*0.7},${dimensions.height/2} 0 0 0 ${dimensions.width*0.7},0 L0,0 Z`} className={`${gateBodyStyle}`} style={{ fill: currentFillColor }} /> )}
+            {gate.type === 'NOT' && ( <> <path d={`M0,0 L${dimensions.width - PORT_RADIUS},${dimensions.height/2} L0,${dimensions.height} Z`} className={`${gateBodyStyle}`} style={{ fill: currentFillColor }} /> <circle cx={dimensions.width} cy={dimensions.height/2} r={PORT_RADIUS} className={`${gateBodyStyle}`} style={{ fill: currentFillColor }} /> </> )}
+            {(gate.type === 'INPUT' || gate.type === 'OUTPUT') && ( <rect width={dimensions.width} height={dimensions.height} rx="10" className={`${gateBodyStyle}`} style={{ fill: currentFillColor }} /> )}
 
             <text x={dimensions.width / 2} y={dimensions.height / 2 + 5} textAnchor="middle" className="fill-white font-bold text-sm pointer-events-none">
                 {gate.type === 'INPUT' ? (gate.value ? 'ON' : 'OFF') : gate.name || gate.type}
