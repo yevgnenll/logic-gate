@@ -1,7 +1,7 @@
 # 🧠 Interactive Logic Gate Simulator
 React와 TypeScript를 사용하여 제작된 웹 기반 논리 회로 시뮬레이터입니다. 사용자는 브라우저에서 직접 AND, OR, NOT과 같은 기본 논리 게이트를 조합하여 복잡한 회로를 설계하고, 그 동작을 실시간으로 시뮬레이션할 수 있습니다.
 
-(이곳에 실제 동작 스크린샷 이미지 링크를 넣어주세요)
+![screenshot.png](public/screenshot.png)
 
 🔗 Live Demo: https://yevgnenll.github.io/logic-gate/
 
