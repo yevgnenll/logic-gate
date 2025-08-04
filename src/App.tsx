@@ -208,7 +208,7 @@ const GateComponent = React.memo(({ gate, onDragStart, onDrag, onDragEnd, onPort
     const fillStyle = gate.value ? 'fill-sky-400' : 'fill-gray-700';
 
     return (
-        <g transform={`translate(${gate.position.x}, ${gate.position.y})`} onMouseDown={handleMouseDown} onClick={(e) => onClick(e, gate.id)} className={!isReadOnly ? 'cursor-move select-none' : 'select-none'}>
+        <g transform={`translate(${gate.position.x}, ${gate.position.y})`} onMouseDown={handleMouseDown} onClick={(e) => onClick(e, gate.id)} className={`gate-component-group ${!isReadOnly ? 'cursor-move select-none' : 'select-none'}`}>
             {gate.type === 'CUSTOM' && (
                 <rect width={dimensions.width} height={dimensions.height} rx="10" className={`${fillStyle} ${gateBodyStyle}`} />
             )}
@@ -295,18 +295,34 @@ export default function App() {
     const [connecting, setConnecting] = useState<{ from: { gateId: string; portIndex: number }; mousePos: { x: number; y: number } } | null>(null);
     const [selectedGateIds, setSelectedGateIds] = useState<string[]>([]);
     const [customGateName, setCustomGateName] = useState("");
-    const [customGates, setCustomGates] = useState<{ [name: string]: CustomGateTemplate }>({});
+    const [customGates, setCustomGates] = useState<{ [name: string]: CustomGateTemplate }>(() => {
+        if (new URLSearchParams(window.location.search).get('view')) return {};
+        try {
+            const saved = localStorage.getItem('customLogicGates');
+            return saved ? JSON.parse(saved) : {};
+        } catch (error) {
+            console.error("Failed to load custom gates", error);
+            return {};
+        }
+    });
     const [selectionBox, setSelectionBox] = useState<{x: number, y: number, width: number, height: number} | null>(null);
     const [viewTransform, setViewTransform] = useState<ViewTransform>({ x: 0, y: 0, k: 1 });
     const [isPanning, setIsPanning] = useState(false);
     const [showShareModal, setShowShareModal] = useState(false);
     const [embedCode, setEmbedCode] = useState("");
 
-    useEffect(() => { if(!isReadOnly) { try { const saved = localStorage.getItem('customLogicGates'); if (saved) { setCustomGates(JSON.parse(saved)); } } catch (error) { console.error("Failed to load custom gates", error); } } }, [isReadOnly]);
     useEffect(() => { if(!isReadOnly) { try { localStorage.setItem('customLogicGates', JSON.stringify(customGates)); } catch (error) { console.error("Failed to save custom gates", error); } } }, [customGates, isReadOnly]);
 
     const addGate = (type: BaseGateType) => {
-        const newGate: Gate = { id: `${type}-${Date.now()}`, type, position: { x: (250 - viewTransform.x) / viewTransform.k, y: (150 - viewTransform.y) / viewTransform.k }, value: false, };
+        let initialX = (250 - viewTransform.x) / viewTransform.k;
+        let initialY = (150 - viewTransform.y) / viewTransform.k;
+
+        while (gates.some(g => g.position.x === initialX && g.position.y === initialY)) {
+            initialX += 20;
+            initialY += 20;
+        }
+
+        const newGate: Gate = { id: `${type}-${Date.now()}`, type, position: { x: initialX, y: initialY }, value: false, };
         setState(s => ({...s, gates: [...s.gates, newGate]}));
     };
 
@@ -344,7 +360,9 @@ export default function App() {
         if (dragInfoRef.current?.hasDragged) {
             setState(s => ({...s}), true); // Record history after drag ends
         }
-        dragInfoRef.current = null;
+        setTimeout(() => {
+            dragInfoRef.current = null;
+        }, 0);
     }, [setState]);
 
     const handleInputToggle = useCallback((id: string) => { setState(s => ({ ...s, gates: s.gates.map(g => (g.id === id && g.type === 'INPUT') ? { ...g, value: !g.value } : g) })); }, [setState]);
@@ -389,7 +407,7 @@ export default function App() {
     };
 
     const handleCanvasMouseDown = (e: React.MouseEvent) => {
-        if (e.target !== e.currentTarget) return; // This is the fix for drag bug
+        if ((e.target as Element).closest('.gate-component-group')) return;
 
         if (e.button === 1) { // Middle mouse button for panning
             setIsPanning(true);
