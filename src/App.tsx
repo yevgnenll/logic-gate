@@ -313,6 +313,7 @@ export default function App() {
     const [selectionBox, setSelectionBox] = useState<{x: number, y: number, width: number, height: number} | null>(null);
     const [viewTransform, setViewTransform] = useState<ViewTransform>({ x: 0, y: 0, k: 1 });
     const [isPanning, setIsPanning] = useState(false);
+    const [isPanModeActive, setIsPanModeActive] = useState(false);
     const [showShareModal, setShowShareModal] = useState(false);
     const [embedCode, setEmbedCode] = useState("");
 
@@ -414,7 +415,7 @@ export default function App() {
     const handleCanvasMouseDown = (e: React.MouseEvent) => {
         if ((e.target as Element).closest('.gate-component-group')) return;
 
-        if (e.button === 1) { // Middle mouse button for panning
+        if (e.button === 1 || (isPanModeActive && e.button === 0)) { // Middle mouse button or Left click in pan mode
             setIsPanning(true);
             panStartRef.current = { x: e.clientX, y: e.clientY };
             e.preventDefault();
@@ -516,6 +517,11 @@ export default function App() {
                 if (connecting) {
                     setConnecting(null);
                 }
+            }
+
+            if (e.key.toLowerCase() === 'h') {
+                e.preventDefault();
+                setIsPanModeActive(prev => !prev);
             }
 
             const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
@@ -745,7 +751,7 @@ export default function App() {
                      onMouseUp={handleCanvasMouseUp}
                      onMouseLeave={handleCanvasMouseUp}
                      onWheel={handleWheel}
-                     className={isPanning ? 'cursor-grabbing' : 'cursor-default'}
+                     className={isPanModeActive ? (isPanning ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-default'}
                 >
                     <g transform={`translate(${viewTransform.x}, ${viewTransform.y}) scale(${viewTransform.k})`}>
                         <defs>
@@ -838,16 +844,20 @@ export default function App() {
                         </div>
                         <div className="absolute bottom-4 left-4 bg-gray-900/80 p-3 rounded-lg text-sm flex flex-col gap-1">
                             <p><strong className="text-sky-400">How to use:</strong></p>
+                            <p>• Press <kbd>H</kbd> or click the hand icon to toggle Pan Mode.</p>
                             <p>• Drag on canvas to select multiple gates.</p>
                             <p>• Press <kbd>Esc</kbd> to cancel wiring.</p>
                             <p>• <kbd>Cmd/Ctrl + Z</kbd> to Undo, <kbd>Cmd/Ctrl + Y</kbd> to Redo.</p>
-                            <p>• Double-click a connected input port to move the wire.</p>
                             <p>• <kbd>Shift</kbd> + Click to add/remove from selection.</p>
-                            <p>• Select gates and press <kbd>Delete</kbd> to remove them.</p>
                         </div>
                     </>
                 )}
                 <div className="absolute bottom-4 right-4 bg-gray-900/80 p-1 rounded-lg flex items-center gap-1 text-white text-xs">
+                    <button onClick={() => setIsPanModeActive(prev => !prev)} className={`w-7 h-7 flex items-center justify-center rounded hover:bg-gray-700 ${isPanModeActive ? 'bg-sky-600' : ''}`}>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path d="M10.064 8.447a.5.5 0 0 1 .557.557l-1.5 6a.5.5 0 0 1-.557.443l-6-1.5a.5.5 0 0 1-.443-.557l1.5-6a.5.5 0 0 1 .557-.443l6 1.5zM9.06 9.89l5.94-1.485a1.5 1.5 0 0 1 1.671 1.672l-1.485 5.94a1.5 1.5 0 0 1-1.672 1.671l-5.94 1.485A1.5 1.5 0 0 1 6 17.515l1.485-5.94a1.5 1.5 0 0 1 1.575-1.575zM2.5 4.002a1.5 1.5 0 0 1 1.5-1.5h8.502a1.5 1.5 0 0 1 1.5 1.5v3.191a1.5 1.5 0 0 1-1.588 1.499l-1.23-.246a.5.5 0 0 1-.443-.557l.309-1.238a.5.5 0 0 1 .557-.443h4.902a.5.5 0 0 0 .5-.5V4.002a.5.5 0 0 0-.5-.5H4.002a.5.5 0 0 0-.5.5v1.191a.5.5 0 0 1-.998.06L2.5 4.002z"/>
+                        </svg>
+                    </button>
                     <button onClick={() => handleZoom('out')} className="w-7 h-7 font-bold text-lg flex items-center justify-center hover:bg-gray-700 rounded">-</button>
                     <button onClick={() => handleZoom('reset')} className="w-14 h-7 hover:bg-gray-700 rounded">{Math.round(viewTransform.k * 100)}%</button>
                     <button onClick={() => handleZoom('in')} className="w-7 h-7 font-bold text-lg flex items-center justify-center hover:bg-gray-700 rounded">+</button>
