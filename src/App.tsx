@@ -250,7 +250,7 @@ const WireComponent = React.memo(({ wire, gates, customGates, value }: { wire: W
             d={pathData}
             strokeWidth="4"
             fill="none"
-            className={`transition-all duration-300 ${value ? 'stroke-sky-400' : 'stroke-gray-500'}`}
+            className={`transition-colors duration-300 ${value ? 'stroke-sky-400' : 'stroke-gray-500'}`}
         />
     );
 });
