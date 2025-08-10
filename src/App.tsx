@@ -520,7 +520,12 @@ export default function App() {
 
             const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
             const modKey = isMac ? e.metaKey : e.ctrlKey;
-            if (modKey && e.key === 'z') { e.preventDefault(); undo(); }
+
+            if (modKey && e.key === 'a') {
+                e.preventDefault();
+                setSelectedGateIds(gates.map(g => g.id));
+            }
+            else if (modKey && e.key === 'z') { e.preventDefault(); undo(); }
             else if (modKey && e.key === 'y') { e.preventDefault(); redo(); }
             else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedGateIds.length > 0) {
                 setState(s => ({ gates: s.gates.filter(g => !selectedGateIds.includes(g.id)), wires: s.wires.filter(w => !selectedGateIds.includes(w.from.gateId) && !selectedGateIds.includes(w.to.gateId)) }));
@@ -529,7 +534,7 @@ export default function App() {
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [selectedGateIds, setState, undo, redo, isReadOnly, connecting]);
+    }, [selectedGateIds, setState, undo, redo, isReadOnly, connecting, gates]);
 
     // Logic simulation
     useEffect(() => {
